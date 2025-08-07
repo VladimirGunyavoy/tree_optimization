@@ -2,6 +2,8 @@ import numpy as np
 from scipy.linalg import expm
 from typing import Tuple
 from scipy.integrate import solve_ivp
+import numba
+from numba import njit, prange, float64
 
 class PendulumSystem:
     """
@@ -23,6 +25,8 @@ class PendulumSystem:
         # Оптимизация: кэш для избежания повторных матричных вычислений
         self._linearization_cache = {}  # key: (theta_0,), value: (A_cont, B_cont)
         self._discretization_cache = {}  # key: (A_hash, B_hash, dt), value: (A_d, B_d)
+
+        self._inv_ml2 = 1.0 / (m * l * l)   # часто используется в ядре
         
     def get_control_bounds(self) -> np.ndarray:
         return np.array([-self.max_control, self.max_control])
@@ -174,3 +178,80 @@ class PendulumSystem:
         """
         # Просто используем обычный метод с отрицательным временным шагом
         return self.scipy_rk45_step(state, control, -dt)
+    
+
+# ──────────────────────────────────────────────────────────────────────
+    # 1. JIT-ядро: одиночный RK4–шаг (fastmath + параллель разрешён)
+    # ──────────────────────────────────────────────────────────────────────
+    @staticmethod
+    @njit(float64[:](float64[:], float64, float64,          # state, u, dt
+                     float64, float64, float64, float64),   # g, l, c, inv_ml2
+          cache=True, fastmath=True)
+    def _rk4_step(state, u, dt, g, l, c, inv_ml2):
+        th, om = state
+        k1t, k1o = om, -g / l * np.sin(th) - c * om + u * inv_ml2
+        k2t, k2o = om + 0.5 * dt * k1o, -g / l * np.sin(th + 0.5 * dt * k1t) - c * (om + 0.5 * dt * k1o) + u * inv_ml2
+        k3t, k3o = om + 0.5 * dt * k2o, -g / l * np.sin(th + 0.5 * dt * k2t) - c * (om + 0.5 * dt * k2o) + u * inv_ml2
+        k4t, k4o = om + dt * k3o,       -g / l * np.sin(th + dt * k3t)       - c * (om + dt * k3o)       + u * inv_ml2
+        th_n = th + (dt / 6.0) * (k1t + 2 * k2t + 2 * k3t + k4t)
+        om_n = om + (dt / 6.0) * (k1o + 2 * k2o + 2 * k3o + k4o)
+        return np.array([th_n, om_n])
+
+    # ──────────────────────────────────────────────────────────────────────
+    # 2. ПАКЕТНЫЙ шаг для векторных вычислений (параллельный prange)
+    # ──────────────────────────────────────────────────────────────────────
+    @staticmethod
+    @njit(parallel=True, fastmath=True, cache=True)
+    def _batch_rk4(states, controls, dts, g, l, c, inv_ml2):
+        out = np.empty_like(states)
+        for i in prange(states.shape[0]):
+            th, om = states[i]
+            u, dt = controls[i], dts[i]
+
+            k1t, k1o = om, -g / l * np.sin(th) - c * om + u * inv_ml2
+            k2t, k2o = om + 0.5 * dt * k1o, -g / l * np.sin(th + 0.5 * dt * k1t) - c * (om + 0.5 * dt * k1o) + u * inv_ml2
+            k3t, k3o = om + 0.5 * dt * k2o, -g / l * np.sin(th + 0.5 * dt * k2t) - c * (om + 0.5 * dt * k2o) + u * inv_ml2
+            k4t, k4o = om + dt * k3o,       -g / l * np.sin(th + dt * k3t)       - c * (om + dt * k3o)       + u * inv_ml2
+
+            out[i, 0] = th + (dt / 6.0) * (k1t + 2 * k2t + 2 * k3t + k4t)
+            out[i, 1] = om + (dt / 6.0) * (k1o + 2 * k2o + 2 * k3o + k4o)
+        return out
+
+    # ──────────────────────────────────────────────────────────────────────
+    # 3. Публичный одиночный шаг
+    # ──────────────────────────────────────────────────────────────────────
+    def step(self, state: np.ndarray, u: float, dt: float, method: str = "jit") -> np.ndarray:
+        """
+        Выполняет один интеграционный шаг.
+        method = "jit"  (быстро)  или  "rk45" (fallback SciPy, медленно).
+        """
+        if method == "jit":
+            return self._rk4_step(state, u, dt, self.g, self.l, self.c, self._inv_ml2)
+        elif method == "rk45":
+            from scipy.integrate import RK45
+
+            def f(_, y):
+                th, om = y
+                dtheta = om
+                domega = -self.g / self.l * np.sin(th) - self.c * om + u * self._inv_ml2
+                return np.array([dtheta, domega])
+
+            solver = RK45(f, 0.0, state, dt, max_step=dt)
+            solver.step()
+            return solver.y
+        else:
+            raise ValueError("method must be 'jit' or 'rk45'")
+
+    # ──────────────────────────────────────────────────────────────────────
+    # 4. Публичный batch-шаг (используйте его в SporeTree)
+    # ──────────────────────────────────────────────────────────────────────
+    def batch_step(self, states: np.ndarray, controls: np.ndarray, dts: np.ndarray) -> np.ndarray:
+        """
+        Параллельный расчёт множества траекторий за один вызов.
+        states   : (N, 2)
+        controls : (N,)
+        dts      : (N,)
+        """
+        return self._batch_rk4(states, controls, dts, self.g, self.l, self.c, self._inv_ml2)
+
+    # ──────────────────────────────────────────────────────────────────────

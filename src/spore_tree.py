@@ -30,6 +30,8 @@ class SporeTree:
             'color': 'red',
             'size': self.config.root_size
         }
+
+    
         
         # Контейнеры для потомков
         self.children = []
@@ -412,3 +414,47 @@ class SporeTree:
 
 
 
+    # ─── добавьте в класс SporeTree ─────────────────────────────────────
+    def update_positions(self,
+                        dt_children: np.ndarray,
+                        dt_grandchildren: np.ndarray,
+                        recompute_means: bool = True):
+        """
+        Пересчитывает координаты детей и внуков, сохраняя
+        ИСХОДНЫЙ порядок self.children и self.sorted_grandchildren.
+        dt_children        – 4 положительных числа
+        dt_grandchildren   – 8 положительных чисел
+        """
+        assert self._grandchildren_sorted, (
+            "Сперва создайте дерево (children+grandchildren) и вызовите "
+            "sort_and_pair_grandchildren(), чтобы зафиксировать порядок."
+        )
+
+        # 1. дети
+        for i, child in enumerate(self.children):
+            signed_dt = np.sign(child['dt']) * dt_children[i]
+            child['dt'] = signed_dt
+            child['position'] = self.pendulum.scipy_rk45_step(
+                state=self.root['position'],
+                control=child['control'],
+                dt=signed_dt
+            )
+
+        # 2. внуки (используем global_idx, sign dt остаётся как было)
+        for gc in self.grandchildren:
+            j = gc['global_idx']                 # 0‥7
+            signed_dt = np.sign(gc['dt']) * dt_grandchildren[j]
+            gc['dt'] = signed_dt
+            gc['dt_abs'] = abs(signed_dt)
+
+            parent = self.children[gc['parent_idx']]
+            gc['position'] = self.pendulum.scipy_rk45_step(
+                state=parent['position'],
+                control=gc['control'],
+                dt=signed_dt
+            )
+
+        # 3. пересчитаем средние точки
+        if recompute_means:
+            self.calculate_mean_points(show=False)
+    # ────────────────────────────────────────────────────────────────────
