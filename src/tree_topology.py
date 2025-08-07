@@ -3,7 +3,7 @@
 Разделяет медленное создание структуры и быстрый пересчет позиций.
 """
 import numpy as np
-from src.pendulum_wrapper import OptimizationPendulum
+from pendulum import OptimizationPendulum
 
 
 def create_tree_topology(initial_position, pendulum, config):
