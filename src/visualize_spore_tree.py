@@ -4,7 +4,7 @@ import numpy as np
 
 def visualize_spore_tree(tree, title="Дерево спор"):
     """
-    Визуализирует дерево спор с правильными цветами стрелок и направлениями.
+    Упрощенная визуализация: только точки спор + линии четырехугольника.
     
     Args:
         tree: объект SporeTree
@@ -12,38 +12,24 @@ def visualize_spore_tree(tree, title="Дерево спор"):
     """
     fig, ax = plt.subplots(1, 1, figsize=tree.config.figure_size)
     
-    print("🎨 ИСПРАВЛЕННАЯ версия visualize_spore_tree загружена!")
+    # === ТОЛЬКО ТОЧКИ ===
     
-    # Рисуем корневую спору
+    # Корень
     ax.scatter(tree.root['position'][0], tree.root['position'][1], 
-              c=tree.root['color'], s=tree.root['size'], alpha=0.8, 
-              label='Root', edgecolors='black', linewidth=2)
+              c='#2C3E50', s=80, alpha=0.8, zorder=5)
     
-    # Добавляем подпись к корню
-    ax.text(tree.root['position'][0], tree.root['position'][1] + 0.02, 
-            'ROOT', fontsize=10, fontweight='bold', 
-            ha='center', va='bottom')
-    
-    # Рисуем детей и стрелки
+    # Дети + стрелки
     if tree._children_created:
+        child_colors = ['#5DADE2', '#A569BD', '#58D68D', '#F4D03F']
         for i, child in enumerate(tree.children):
-            # Точка ребенка
             ax.scatter(child['position'][0], child['position'][1],
-                      c=child['color'], s=child['size'], alpha=0.8,
-                      edgecolors='black', linewidth=1, 
-                      label=f"{child['name']} (dt={child['dt']:+.5f})")
-            
-            # Номер ребенка
-            ax.text(child['position'][0], child['position'][1] + 0.01, 
-                    str(i), fontsize=9, fontweight='bold', 
-                    color='white', ha='center', va='center',
-                    bbox=dict(boxstyle="circle,pad=0.1", facecolor='black', alpha=0.8))
+                      c=child_colors[i], s=60, alpha=0.8, zorder=4)
             
             # НАПРАВЛЕНИЕ стрелки зависит от знака dt
             if child['dt'] > 0:  # forward: от корня к ребенку
                 arrow_start = tree.root['position']
                 arrow_end = child['position']
-            else:  # backward: от ребенка к корню (ОБРАТНОЕ!)
+            else:  # backward: от ребенка к корню
                 arrow_start = child['position']
                 arrow_end = tree.root['position']
             
@@ -53,48 +39,35 @@ def visualize_spore_tree(tree, title="Дерево спор"):
             else:  # u_min
                 arrow_color = '#1ABC9C'  # бирюзовый для u_min
             
-            # Стрелка БЕЗ аннотаций!
+            # Стрелка
             arrow = FancyArrowPatch(
                 arrow_start, arrow_end,
                 arrowstyle='->', 
                 mutation_scale=20,
-                color=arrow_color,  # ← ПРАВИЛЬНЫЙ цвет!
+                color=arrow_color,
                 alpha=0.7,
                 linewidth=3
             )
             ax.add_patch(arrow)
     
-    # Рисуем внуков и стрелки
+    # Внуки + стрелки
     if tree._grandchildren_created:
-        # Цвета для внуков - светлые версии родительских цветов
-        grandchild_colors = {
-            '#FF6B6B': '#FFB3BA',  # коралловый → светло-розовый
-            '#9B59B6': '#D7BDE2',  # фиолетовый → светло-фиолетовый
-            '#1ABC9C': '#A3E4D7',  # бирюзовый → светло-бирюзовый  
-            '#F39C12': '#F8C471'   # оранжевый → светло-оранжевый
-        }
+        grandchild_colors = ['#D6EAF8', '#E8DAEF', '#D5F4E6', '#FCF3CF']
+        grandchildren_to_show = tree.sorted_grandchildren if tree._grandchildren_sorted else tree.grandchildren
         
-        for gc in tree.grandchildren:
-            parent = tree.children[gc['parent_idx']]
-            gc_color = grandchild_colors.get(parent['color'], 'gray')
-            
-            # Точка внука
+        for gc in grandchildren_to_show:
+            gc_color = grandchild_colors[gc['parent_idx']]
             ax.scatter(gc['position'][0], gc['position'][1],
-                    c=gc_color, s=gc['size'], alpha=0.8,
-                    edgecolors='gray', linewidth=1, 
-                    label=f"{gc['name']} (dt={gc['dt']:+.5f})")
+                      c=gc_color, s=40, alpha=0.9, zorder=3)
             
-            # Глобальный индекс внука
-            ax.text(gc['position'][0], gc['position'][1] + 0.01, 
-                    str(gc['global_idx']), fontsize=7, fontweight='bold', 
-                    color='white', ha='center', va='center',
-                    bbox=dict(boxstyle="circle,pad=0.5", facecolor='darkgray', alpha=0.9))
+            # Стрелка от/к родителю
+            parent = tree.children[gc['parent_idx']]
             
             # НАПРАВЛЕНИЕ стрелки зависит от знака dt внука
             if gc['dt'] > 0:  # forward: от родителя к внуку
                 arrow_start = parent['position']
                 arrow_end = gc['position']
-            else:  # backward: от внука к родителю (ОБРАТНОЕ!)
+            else:  # backward: от внука к родителю
                 arrow_start = gc['position']
                 arrow_end = parent['position']
             
@@ -104,48 +77,78 @@ def visualize_spore_tree(tree, title="Дерево спор"):
             else:  # u_min  
                 arrow_color = '#1ABC9C'  # бирюзовый для u_min
             
-            # Стрелка БЕЗ аннотаций!
+            # Стрелка
             arrow = FancyArrowPatch(
                 arrow_start, arrow_end,
                 arrowstyle='->', 
                 mutation_scale=15,
-                color=arrow_color,  # ← ПРАВИЛЬНЫЙ цвет!
+                color=arrow_color,
                 alpha=0.6,
                 linewidth=2
             )
             ax.add_patch(arrow)
     
-    # Настройка графика
+    # === СРЕДНИЕ ТОЧКИ И ЛИНИИ ===
+    
+    if hasattr(tree, 'mean_points') and tree.mean_points is not None:
+        mean_points = tree.mean_points
+        
+        # Средние точки
+        ax.scatter(mean_points[:, 0], mean_points[:, 1], 
+                  c='#27AE60', s=70, alpha=0.9, zorder=10)
+        
+        # Линии четырехугольника
+        for i in range(4):
+            start_point = mean_points[i]
+            end_point = mean_points[(i + 1) % 4]
+            ax.plot([start_point[0], end_point[0]], 
+                    [start_point[1], end_point[1]], 
+                    color='#566573', linewidth=2, alpha=0.2, zorder=9, linestyle='--')
+    
+    # === НАСТРОЙКИ ГРАФИКА ===
+    
     ax.set_xlabel('θ (радианы)')
     ax.set_ylabel('θ̇ (рад/с)')
     ax.set_title(title)
     ax.grid(True, alpha=0.3)
     
-    # Автоматическое масштабирование
-    all_x = [tree.root['position'][0]]
-    all_y = [tree.root['position'][1]]
+    # Ручная настройка границ: плотно по X, отступы по Y
+    all_x_coords = []
+    all_y_coords = []
+    
+    # Собираем ВСЕ координаты
+    all_x_coords.append(tree.root['position'][0])
+    all_y_coords.append(tree.root['position'][1])
     
     if tree._children_created:
-        all_x.extend([child['position'][0] for child in tree.children])
-        all_y.extend([child['position'][1] for child in tree.children])
+        for child in tree.children:
+            all_x_coords.append(child['position'][0])
+            all_y_coords.append(child['position'][1])
     
     if tree._grandchildren_created:
-        all_x.extend([gc['position'][0] for gc in tree.grandchildren])
-        all_y.extend([gc['position'][1] for gc in tree.grandchildren])
+        grandchildren_to_show = tree.sorted_grandchildren if tree._grandchildren_sorted else tree.grandchildren
+        for gc in grandchildren_to_show:
+            all_x_coords.append(gc['position'][0])
+            all_y_coords.append(gc['position'][1])
     
-    # Добавляем отступы
-    x_range = max(all_x) - min(all_x)
-    y_range = max(all_y) - min(all_y)
-    x_margin = max(x_range * 0.1, 0.05)
-    y_margin = max(y_range * 0.1, 0.05)
+    if hasattr(tree, 'mean_points') and tree.mean_points is not None:
+        for mp in tree.mean_points:
+            all_x_coords.append(mp[0])
+            all_y_coords.append(mp[1])
     
-    ax.set_xlim(min(all_x) - x_margin, max(all_x) + x_margin)
-    ax.set_ylim(min(all_y) - y_margin, max(all_y) + y_margin)
+    # Границы: плотно по X, отступы по Y
+    x_min, x_max = min(all_x_coords), max(all_x_coords)
+    y_min, y_max = min(all_y_coords), max(all_y_coords)
     
-    # Легенда справа
-    handles, labels = ax.get_legend_handles_labels()
-    by_label = dict(zip(labels, handles))
-    ax.legend(by_label.values(), by_label.keys(), 
-             loc='center left', bbox_to_anchor=(1, 0.5), fontsize=8)
+    x_range = x_max - x_min
+    y_range = y_max - y_min
+    
+    # По X: очень малый отступ (только чтобы точки не касались краев)
+    x_margin = max(x_range * 0.02, 1e-6)  # 2% или минимум
+    ax.set_xlim(x_min - x_margin, x_max + x_margin)
+    
+    # По Y: нормальные отступы
+    y_margin = max(y_range * 0.1, 0.001)  # 10% отступ
+    ax.set_ylim(y_min - y_margin, y_max + y_margin)
     
     plt.show()
