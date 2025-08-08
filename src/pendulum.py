@@ -220,20 +220,20 @@ class PendulumSystem:
     # ──────────────────────────────────────────────────────────────────────
     # 3. Публичный одиночный шаг
     # ──────────────────────────────────────────────────────────────────────
-    def step(self, state: np.ndarray, u: float, dt: float, method: str = "jit") -> np.ndarray:
+    def step(self, state: np.ndarray, control: float, dt: float, method: str = "jit") -> np.ndarray:
         """
         Выполняет один интеграционный шаг.
         method = "jit"  (быстро)  или  "rk45" (fallback SciPy, медленно).
         """
         if method == "jit":
-            return self._rk4_step(state, u, dt, self.g, self.l, self.c, self._inv_ml2)
+            return self._rk4_step(state, control, dt, self.g, self.l, self.damping, self._inv_ml2)
         elif method == "rk45":
             from scipy.integrate import RK45
 
             def f(_, y):
                 th, om = y
                 dtheta = om
-                domega = -self.g / self.l * np.sin(th) - self.c * om + u * self._inv_ml2
+                domega = -self.g / self.l * np.sin(th) - self.damping * om + control * self._inv_ml2
                 return np.array([dtheta, domega])
 
             solver = RK45(f, 0.0, state, dt, max_step=dt)
@@ -252,6 +252,6 @@ class PendulumSystem:
         controls : (N,)
         dts      : (N,)
         """
-        return self._batch_rk4(states, controls, dts, self.g, self.l, self.c, self._inv_ml2)
+        return self._batch_rk4(states, controls, dts, self.g, self.l, self.damping, self._inv_ml2)
 
     # ──────────────────────────────────────────────────────────────────────

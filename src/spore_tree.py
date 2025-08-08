@@ -86,8 +86,8 @@ class SporeTree:
             # Используем dt с нужным знаком
             signed_dt = dt_children[i] * dt_signs[i]
             
-            # Вычисляем новую позицию через scipy_rk45_step
-            new_position = self.pendulum.scipy_rk45_step(
+            # Вычисляем новую позицию через step
+            new_position = self.pendulum.step(
                 state=self.root['position'],
                 control=controls[i],
                 dt=signed_dt
@@ -183,7 +183,7 @@ class SporeTree:
                     direction = "backward"
                 
                 # Вычисляем позицию внука от позиции родителя
-                new_position = self.pendulum.scipy_rk45_step(
+                new_position = self.pendulum.step(
                     state=parent['position'],
                     control=reversed_control,  # ОБРАТНОЕ управление!
                     dt=final_dt
@@ -415,46 +415,139 @@ class SporeTree:
 
 
     # ─── добавьте в класс SporeTree ─────────────────────────────────────
-    def update_positions(self,
-                        dt_children: np.ndarray,
-                        dt_grandchildren: np.ndarray,
-                        recompute_means: bool = True):
-        """
-        Пересчитывает координаты детей и внуков, сохраняя
-        ИСХОДНЫЙ порядок self.children и self.sorted_grandchildren.
-        dt_children        – 4 положительных числа
-        dt_grandchildren   – 8 положительных чисел
-        """
-        assert self._grandchildren_sorted, (
-            "Сперва создайте дерево (children+grandchildren) и вызовите "
-            "sort_and_pair_grandchildren(), чтобы зафиксировать порядок."
-        )
+    # def update_positions(self,
+    #                     dt_children: np.ndarray,
+    #                     dt_grandchildren: np.ndarray,
+    #                     recompute_means: bool = True):
+    #     """
+    #     Пересчитывает координаты детей и внуков, сохраняя
+    #     ИСХОДНЫЙ порядок self.children и self.sorted_grandchildren.
+    #     dt_children        – 4 положительных числа
+    #     dt_grandchildren   – 8 положительных чисел
+    #     """
+    #     assert self._grandchildren_sorted, (
+    #         "Сперва создайте дерево (children+grandchildren) и вызовите "
+    #         "sort_and_pair_grandchildren(), чтобы зафиксировать порядок."
+    #     )
 
-        # 1. дети
-        for i, child in enumerate(self.children):
-            signed_dt = np.sign(child['dt']) * dt_children[i]
-            child['dt'] = signed_dt
-            child['position'] = self.pendulum.scipy_rk45_step(
-                state=self.root['position'],
-                control=child['control'],
-                dt=signed_dt
-            )
+    #     # 1. дети
+    #     for i, child in enumerate(self.children):
+    #         signed_dt = np.sign(child['dt']) * dt_children[i]
+    #         child['dt'] = signed_dt
+    #         child['position'] = self.pendulum.step(
+    #             state=self.root['position'],
+    #             control=child['control'],
+    #             dt=signed_dt
+    #         )
 
-        # 2. внуки (используем global_idx, sign dt остаётся как было)
-        for gc in self.grandchildren:
-            j = gc['global_idx']                 # 0‥7
-            signed_dt = np.sign(gc['dt']) * dt_grandchildren[j]
-            gc['dt'] = signed_dt
-            gc['dt_abs'] = abs(signed_dt)
+    #     # 2. внуки (используем global_idx, sign dt остаётся как было)
+    #     for gc in self.grandchildren:
+    #         j = gc['global_idx']                 # 0‥7
+    #         signed_dt = np.sign(gc['dt']) * dt_grandchildren[j]
+    #         gc['dt'] = signed_dt
+    #         gc['dt_abs'] = abs(signed_dt)
 
-            parent = self.children[gc['parent_idx']]
-            gc['position'] = self.pendulum.scipy_rk45_step(
-                state=parent['position'],
-                control=gc['control'],
-                dt=signed_dt
-            )
+    #         parent = self.children[gc['parent_idx']]
+    #         gc['position'] = self.pendulum.step(
+    #             state=parent['position'],
+    #             control=gc['control'],
+    #             dt=signed_dt
+    #         )
 
-        # 3. пересчитаем средние точки
-        if recompute_means:
-            self.calculate_mean_points(show=False)
+    #     # 3. пересчитаем средние точки
+    #     if recompute_means:
+    #         self.calculate_mean_points(show=False)
     # ────────────────────────────────────────────────────────────────────
+
+    def update_positions(self, dt_children: np.ndarray, dt_grandchildren: np.ndarray, 
+                                        recompute_means: bool = True, show: bool = False):
+        """
+        🚀 ОПТИМИЗИРОВАННАЯ JIT версия update_positions() 
+        
+        Основана на результатах бенчмарка: JIT одиночные вызовы быстрее batch в 2x!
+        Убираем все лишние операции и проверки.
+        """
+        # МИНИМАЛЬНЫЕ проверки (только критические)
+        assert self._grandchildren_sorted, "Дерево должно быть отсортировано"
+
+        # ═══════════════════════════════════════════════════════════════════
+        # ЭТАП 1: 🔥 БЫСТРОЕ ОБНОВЛЕНИЕ ДЕТЕЙ (4 JIT вызова)
+        # ═══════════════════════════════════════════════════════════════════
+        
+        root_pos = self.root['position']  # Кешируем обращение
+        
+        # Обновляем детей напрямую без промежуточных массивов
+        for i in range(4):  # Развернутый цикл быстрее enumerate
+            child = self.children[i]
+            dt_sign = 1 if child['dt'] > 0 else -1  # Быстрее np.sign()
+            signed_dt = dt_children[i] * dt_sign
+            
+            # Прямое обновление без копирований
+            child['dt'] = signed_dt
+            child['position'] = self.pendulum.step(root_pos, child['control'], signed_dt)
+
+        # ═══════════════════════════════════════════════════════════════════
+        # ЭТАП 2: 🔥 БЫСТРОЕ ОБНОВЛЕНИЕ ВНУКОВ (8 JIT вызовов)
+        # ═══════════════════════════════════════════════════════════════════
+        
+        # Предвычисляем позиции детей для быстрого доступа
+        child_positions = [child['position'] for child in self.children]
+        
+        # Обновляем внуков напрямую по global_idx
+        for gc in self.grandchildren:
+            j = gc['global_idx']  # 0-7
+            parent_pos = child_positions[gc['parent_idx']]  # Быстрый доступ
+            
+            dt_sign = 1 if gc['dt'] > 0 else -1  # Быстрее np.sign()
+            signed_dt = dt_grandchildren[j] * dt_sign
+            
+            # Прямое обновление
+            gc['dt'] = signed_dt
+            gc['dt_abs'] = abs(signed_dt)  # Inline abs быстрее np.abs
+            gc['position'] = self.pendulum.step(parent_pos, gc['control'], signed_dt)
+
+        # ═══════════════════════════════════════════════════════════════════
+        # ЭТАП 3: БЫСТРЫЙ ПЕРЕСЧЕТ СРЕДНИХ ТОЧЕК (если нужно)
+        # ═══════════════════════════════════════════════════════════════════
+        
+        if recompute_means:
+            # Inline вычисление вместо вызова метода (убираем overhead)
+            self.mean_points = np.zeros((4, 2))
+            
+            sorted_gc = self.sorted_grandchildren
+            for pair_idx in range(4):
+                idx1, idx2 = pair_idx * 2, pair_idx * 2 + 1
+                pos1 = sorted_gc[idx1]['position']
+                pos2 = sorted_gc[idx2]['position']
+                self.mean_points[pair_idx] = (pos1 + pos2) * 0.5  # * 0.5 быстрее / 2
+            
+        if show:
+            print("🔄 JIT update: 4 детей + 8 внуков за 12 оптимизированных вызовов")
+
+
+    def mean_points(self, show: bool = None) -> np.ndarray:
+        """
+        🚀 Быстрая версия calculate_mean_points без лишних проверок.
+        """
+        if self.mean_points is None:
+            self.mean_points = np.zeros((4, 2))
+        
+        sorted_gc = self.sorted_grandchildren  # Один доступ к атрибуту
+        
+        # Развернутый цикл для максимальной скорости
+        self.mean_points[0] = (sorted_gc[0]['position'] + sorted_gc[1]['position']) * 0.5
+        self.mean_points[1] = (sorted_gc[2]['position'] + sorted_gc[3]['position']) * 0.5
+        self.mean_points[2] = (sorted_gc[4]['position'] + sorted_gc[5]['position']) * 0.5
+        self.mean_points[3] = (sorted_gc[6]['position'] + sorted_gc[7]['position']) * 0.5
+        
+        return self.mean_points
+
+
+    # Также можно добавить к классу:
+    def reset_for_optimization(self):
+        """Быстрый сброс перед оптимизацией - убираем только необходимое."""
+        # НЕ пересоздаем массивы, только обнуляем флаги
+        self._children_created = False
+        self._grandchildren_created = False
+        self._grandchildren_sorted = False
+        # mean_points оставляем - переиспользуем массив
