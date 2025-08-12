@@ -2,15 +2,19 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import FancyArrowPatch
 import numpy as np
 
-def visualize_spore_tree(tree, title="Дерево спор"):
+def visualize_spore_tree(tree, title="Дерево спор", figsize=None):
     """
     Упрощенная визуализация: только точки спор + линии четырехугольника.
     
     Args:
         tree: объект SporeTree
         title: заголовок графика
+        figsize: размер полотна (ширина, высота). Если None, используется из config
     """
-    fig, ax = plt.subplots(1, 1, figsize=tree.config.figure_size)
+    if figsize is None:
+        figsize = tree.config.figure_size
+    
+    fig, ax = plt.subplots(1, 1, figsize=figsize)
     
     # === ТОЛЬКО ТОЧКИ ===
     
@@ -52,13 +56,21 @@ def visualize_spore_tree(tree, title="Дерево спор"):
     
     # Внуки + стрелки
     if tree._grandchildren_created:
-        grandchild_colors = ['#D6EAF8', '#E8DAEF', '#D5F4E6', '#FCF3CF']
+        # Яркие и разнообразные цвета для внуков (по 2 цвета для каждого родителя)
+        grandchild_colors = [
+            '#FF6B9D', '#C44569',  # От родителя 0: розовый, малиновый
+            '#4834DF', '#686DE0',  # От родителя 1: синий, светло-синий
+            '#00D2D3', '#01A3A4',  # От родителя 2: бирюзовый, тёмно-бирюзовый
+            '#FFA726', '#FF7043'   # От родителя 3: оранжевый, красно-оранжевый
+        ]
         grandchildren_to_show = tree.sorted_grandchildren if tree._grandchildren_sorted else tree.grandchildren
         
         for gc in grandchildren_to_show:
-            gc_color = grandchild_colors[gc['parent_idx']]
+            # Используем global_idx для выбора уникального цвета
+            gc_color = grandchild_colors[gc['global_idx']]
             ax.scatter(gc['position'][0], gc['position'][1],
-                      c=gc_color, s=40, alpha=1, zorder=3)
+                      c=gc_color, s=40, alpha=1, zorder=3, 
+                      label=f'Внук {gc["global_idx"]}' if gc['global_idx'] < 8 else None)
             
             # Стрелка от/к родителю
             parent = tree.children[gc['parent_idx']]
@@ -88,29 +100,30 @@ def visualize_spore_tree(tree, title="Дерево спор"):
             )
             ax.add_patch(arrow)
     
-    # === СРЕДНИЕ ТОЧКИ И ЛИНИИ ===
-    
-    if hasattr(tree, 'mean_points') and tree.mean_points is not None:
-        mean_points = tree.mean_points
-        
-        # Средние точки
-        ax.scatter(mean_points[:, 0], mean_points[:, 1], 
-                  c='#27AE60', s=70, alpha=0.9, zorder=10)
-        
-        # Линии четырехугольника
-        for i in range(4):
-            start_point = mean_points[i]
-            end_point = mean_points[(i + 1) % 4]
-            ax.plot([start_point[0], end_point[0]], 
-                    [start_point[1], end_point[1]], 
-                    color='#566573', linewidth=2, alpha=0.2, zorder=9, linestyle='--')
+    # === СРЕДНИЕ ТОЧКИ И ЛИНИИ УДАЛЕНЫ ===
+    # Средние точки пар больше не отображаются для упрощения визуализации
     
     # === НАСТРОЙКИ ГРАФИКА ===
     
-    ax.set_xlabel('θ (радианы)')
-    ax.set_ylabel('θ̇ (рад/с)')
+    ax.set_xlabel('θ (угол маятника, радианы)')
+    ax.set_ylabel('θ̇ (угловая скорость, рад/с)')
     ax.set_title(title)
     ax.grid(True, alpha=0.3)
+    
+    # Настройка легенды
+    if tree._grandchildren_created:
+        # Создаём легенду только для внуков
+        handles, labels = ax.get_legend_handles_labels()
+        # Фильтруем только внуков (начинаются с "Внук")
+        grandchild_handles = [h for h, l in zip(handles, labels) if l and l.startswith('Внук')]
+        grandchild_labels = [l for l in labels if l and l.startswith('Внук')]
+        
+        if grandchild_handles:
+            legend = ax.legend(grandchild_handles, grandchild_labels, 
+                             bbox_to_anchor=(1.05, 1), loc='upper left',
+                             title='Внуки (индексы)', title_fontsize=10,
+                             fontsize=9, framealpha=0.9)
+            legend.get_title().set_fontweight('bold')
     
     # Ручная настройка границ: плотно по X, отступы по Y
     all_x_coords = []
@@ -131,10 +144,7 @@ def visualize_spore_tree(tree, title="Дерево спор"):
             all_x_coords.append(gc['position'][0])
             all_y_coords.append(gc['position'][1])
     
-    if hasattr(tree, 'mean_points') and tree.mean_points is not None:
-        for mp in tree.mean_points:
-            all_x_coords.append(mp[0])
-            all_y_coords.append(mp[1])
+    # Убираем сбор координат средних точек, так как они больше не отображаются
     
     # Границы: плотно по X, отступы по Y
     x_min, x_max = min(all_x_coords), max(all_x_coords)

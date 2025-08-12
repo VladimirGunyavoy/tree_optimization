@@ -23,7 +23,7 @@ class SporeTreeConfig:
     assert_pairing: bool = True  # проверять правильность пар после сортировки
     
     # Параметры визуализации (на будущее)
-    figure_size: Tuple[int, int] = (14, 8)
+    figure_size: Tuple[int, int] = (16, 12)
     root_size: int = 100
     child_size: int = 80
     grandchild_size: int = 40

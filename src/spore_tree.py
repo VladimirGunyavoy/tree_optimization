@@ -2,7 +2,7 @@ import numpy as np
 from typing import List, Dict, Any, Optional
 
 # Импорт конфигурации (должен быть в том же пакете или добавлен в путь)
-from spore_tree_config import SporeTreeConfig
+from .spore_tree_config import SporeTreeConfig
 
 class SporeTree:
     """
@@ -37,6 +37,7 @@ class SporeTree:
         self.children = []
         self.grandchildren = []
         self.sorted_grandchildren = []
+        self.pairing_candidate_map: Dict[int, List[int]] = {}
         
         # Флаги состояния
         self._children_created = False
@@ -212,6 +213,9 @@ class SporeTree:
         
         self._grandchildren_created = True
         
+        # Создаем карту кандидатов после того, как все внуки созданы
+        self._create_pairing_candidate_map(show=show)
+        
         if show:
             print(f"\n✅ Создано {len(self.grandchildren)} внуков с ОБРАТНЫМ управлением")
             print(f"   Структура: от каждого родителя по 2 внука (forward/backward)")
@@ -219,6 +223,35 @@ class SporeTree:
         return self.grandchildren
 
     
+    def _create_pairing_candidate_map(self, show: bool = None):
+        """
+        Создает и кеширует карту кандидатов для спаривания.
+        Ключ - global_idx внука, значение - список global_idx всех внуков от других родителей.
+        Вызывается автоматически после создания внуков.
+        """
+        if show is None:
+            show = self.config.show_debug
+            
+        if show:
+            print("🗺️  Создание карты кандидатов для спаривания...")
+
+        self.pairing_candidate_map = {}
+        
+        # Для небольшого количества внуков (8) прямые циклы достаточно эффективны
+        for current_grandchild in self.grandchildren:
+            current_id = current_grandchild['global_idx']
+            current_parent_id = current_grandchild['parent_idx']
+            
+            candidates = []
+            for other_grandchild in self.grandchildren:
+                if other_grandchild['parent_idx'] != current_parent_id:
+                    candidates.append(other_grandchild['global_idx'])
+            
+            self.pairing_candidate_map[current_id] = sorted(candidates)
+
+        if show:
+            print(f"✅ Карта кандидатов создана. Количество ключей: {len(self.pairing_candidate_map)}")
+
     def get_default_dt_vector(self) -> np.ndarray:
         """
         Возвращает дефолтный вектор времен для оптимизации.
