@@ -60,7 +60,8 @@ class TreeEvaluator:
 
     def dynamic_loss(self, dt_all: np.ndarray, alpha: float = 10.0, 
                      w_distance: float = 1.0, w_velocity: float = 0.0,
-                     w_repulsion: float = 0.0, w_time: float = 0.0, 
+                     w_repulsion: float = 0.0, w_parent_repulsion: float = 0.0, 
+                     w_time: float = 0.0, 
                      p_norm: float = 1.0) -> float:
         """
         Вычисляет общую взвешенную функцию потерь.
@@ -71,6 +72,7 @@ class TreeEvaluator:
             w_distance: Вес для компоненты расстояния.
             w_velocity: Вес для компоненты скорости сближения.
             w_repulsion: Вес для компоненты отталкивания.
+            w_parent_repulsion: Вес для компоненты отталкивания родителей.
             w_time: Вес для бонуса за время (регуляризации).
             p_norm: Параметр p-нормы для бонуса за время.
 
@@ -82,7 +84,8 @@ class TreeEvaluator:
         total_loss = (
             w_distance * components['distance_loss'] +
             w_velocity * components['velocity_loss'] +
-            w_repulsion * components['repulsion_loss'] -
+            w_repulsion * components['repulsion_loss'] +
+            w_parent_repulsion * components['parent_repulsion_loss'] -
             w_time * components['time_bonus']
         )
         return total_loss
@@ -143,11 +146,22 @@ class TreeEvaluator:
             epsilon_rep = 1e-6
             repulsion_loss = np.sum(1.0 / (distances + epsilon_rep))
 
+        # 4. Расчет потерь отталкивания для родителей
+        parent_repulsion_loss = 0.0
+        children_positions = np.array([child['position'] for child in self.tree.children])
+        if children_positions.shape[0] > 1:
+            from scipy.spatial.distance import pdist
+            parent_distances = pdist(children_positions)
+            epsilon_rep = 1e-6
+            parent_repulsion_loss = np.sum(1.0 / (parent_distances + epsilon_rep))
+
+
         return {
             'distance_loss': distance_loss,
             'velocity_loss': velocity_loss,
             'time_bonus': time_bonus,
             'repulsion_loss': repulsion_loss,
+            'parent_repulsion_loss': parent_repulsion_loss,
             'sum_abs_dt': np.sum(np.abs(dt_all))
         }
 # ────────────────────────────────────────────────────────────────────

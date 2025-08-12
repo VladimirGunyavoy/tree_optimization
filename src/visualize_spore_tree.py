@@ -2,163 +2,146 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import FancyArrowPatch
 import numpy as np
 
-def visualize_spore_tree(tree, title="Дерево спор", figsize=None):
+def visualize_spore_tree(tree_data, title="Дерево спор", ax=None, figsize=None, show_legend=True):
     """
     Упрощенная визуализация: только точки спор + линии четырехугольника.
     
     Args:
-        tree: объект SporeTree
+        tree_data: dict с данными дерева ('root', 'children', 'grandchildren')
+                   или объект SporeTree
         title: заголовок графика
-        figsize: размер полотна (ширина, высота). Если None, используется из config
+        ax: объект осей matplotlib для рисования. Если None, создается новый.
+        figsize: размер полотна (ширина, высота).
+        show_legend: показывать ли легенду.
     """
-    if figsize is None:
-        figsize = tree.config.figure_size
+    if ax is None:
+        if figsize is None:
+            figsize = (12, 9)
+        fig, ax = plt.subplots(1, 1, figsize=figsize)
     
-    fig, ax = plt.subplots(1, 1, figsize=figsize)
-    
-    # === ТОЛЬКО ТОЧКИ ===
+    # Определяем, работаем мы с объектом tree или со словарем
+    if isinstance(tree_data, dict):
+        root = tree_data['root']
+        children = tree_data['children']
+        grandchildren = tree_data['grandchildren']
+        _children_created = bool(children)
+        _grandchildren_created = bool(grandchildren)
+        # В словаре нет информации о сортировке, предполагаем, что она не нужна
+        grandchildren_to_show = grandchildren
+    else: # SporeTree object
+        root = tree_data.root
+        children = tree_data.children
+        grandchildren = tree_data.grandchildren
+        _children_created = tree_data._children_created
+        _grandchildren_created = tree_data._grandchildren_created
+        grandchildren_to_show = tree_data.sorted_grandchildren if tree_data._grandchildren_sorted else tree_data.grandchildren
+
+
+    # === ТОЧКИ ===
     
     # Корень
-    ax.scatter(tree.root['position'][0], tree.root['position'][1], 
-              c='#2C3E50', s=80, alpha=0.8, zorder=5)
+    ax.scatter(root['position'][0], root['position'][1], 
+               c='#2C3E50', s=300, alpha=0.9, zorder=5) # Увеличен размер
     
     # Дети + стрелки
-    if tree._children_created:
+    if _children_created:
         child_colors = ['#5DADE2', '#A569BD', '#58D68D', '#F4D03F']
-        for i, child in enumerate(tree.children):
+        for i, child in enumerate(children):
             ax.scatter(child['position'][0], child['position'][1],
-                      c=child_colors[i], s=60, alpha=1, zorder=4)
+                      c=child_colors[i], s=300, alpha=1, zorder=4) # Увеличен размер
             
             # НАПРАВЛЕНИЕ стрелки зависит от знака dt
             if child['dt'] > 0:  # forward: от корня к ребенку
-                arrow_start = tree.root['position']
+                arrow_start = root['position']
                 arrow_end = child['position']
             else:  # backward: от ребенка к корню
                 arrow_start = child['position']
-                arrow_end = tree.root['position']
+                arrow_end = root['position']
             
             # ЦВЕТ стрелки зависит от знака управления
             if child['control'] > 0:  # u_max 
-                arrow_color = '#FF6B6B'  # коралловый для u_max
+                arrow_color = '#FF6B6B'
             else:  # u_min
-                arrow_color = '#1ABC9C'  # бирюзовый для u_min
+                arrow_color = '#1ABC9C'
             
-            # Стрелка
             arrow = FancyArrowPatch(
-                arrow_start, arrow_end,
-                arrowstyle='->', 
-                mutation_scale=20,
-                color=arrow_color,
-                alpha=0.7,
-                linewidth=3
+                arrow_start, arrow_end, arrowstyle='->', 
+                mutation_scale=20, color=arrow_color, alpha=0.7, linewidth=3
             )
             ax.add_patch(arrow)
     
     # Внуки + стрелки
-    if tree._grandchildren_created:
-        # Яркие и разнообразные цвета для внуков (по 2 цвета для каждого родителя)
+    if _grandchildren_created:
         grandchild_colors = [
-            '#FF6B9D', '#C44569',  # От родителя 0: розовый, малиновый
-            '#4834DF', '#686DE0',  # От родителя 1: синий, светло-синий
-            '#00D2D3', '#01A3A4',  # От родителя 2: бирюзовый, тёмно-бирюзовый
-            '#FFA726', '#FF7043'   # От родителя 3: оранжевый, красно-оранжевый
+            '#FF1744', '#9C27B0', '#2196F3', '#4CAF50',
+            '#FF9800', '#795548', '#E91E63', '#607D8B'
         ]
-        grandchildren_to_show = tree.sorted_grandchildren if tree._grandchildren_sorted else tree.grandchildren
         
         for gc in grandchildren_to_show:
-            # Используем global_idx для выбора уникального цвета
             gc_color = grandchild_colors[gc['global_idx']]
             ax.scatter(gc['position'][0], gc['position'][1],
-                      c=gc_color, s=40, alpha=1, zorder=3, 
-                      label=f'Внук {gc["global_idx"]}' if gc['global_idx'] < 8 else None)
+                      c=gc_color, s=400, alpha=1, zorder=3) # Еще крупнее
             
-            # Стрелка от/к родителю
-            parent = tree.children[gc['parent_idx']]
+            # Добавляем номер внука прямо на точку
+            ax.text(gc['position'][0], gc['position'][1], str(gc['global_idx']),
+                    color='white', ha='center', va='center',
+                    fontweight='bold', fontsize=12)
+
+            parent = children[gc['parent_idx']]
             
-            # НАПРАВЛЕНИЕ стрелки зависит от знака dt внука
-            if gc['dt'] > 0:  # forward: от родителя к внуку
-                arrow_start = parent['position']
-                arrow_end = gc['position']
-            else:  # backward: от внука к родителю
-                arrow_start = gc['position']
-                arrow_end = parent['position']
+            if gc['dt'] > 0:
+                arrow_start, arrow_end = parent['position'], gc['position']
+            else:
+                arrow_start, arrow_end = gc['position'], parent['position']
             
-            # ЦВЕТ стрелки зависит от знака управления внука
-            if gc['control'] > 0:  # u_max
-                arrow_color = '#FF6B6B'  # коралловый для u_max
-            else:  # u_min  
-                arrow_color = '#1ABC9C'  # бирюзовый для u_min
+            arrow_color = '#FF6B6B' if gc['control'] > 0 else '#1ABC9C'
             
-            # Стрелка
             arrow = FancyArrowPatch(
-                arrow_start, arrow_end,
-                arrowstyle='->', 
-                mutation_scale=15,
-                color=arrow_color,
-                alpha=0.5,
-                linewidth=2
-            )
+                arrow_start, arrow_end, arrowstyle='->', 
+                mutation_scale=25, color=arrow_color, alpha=0.6, linewidth=3) # Стрелки жирнее
             ax.add_patch(arrow)
-    
-    # === СРЕДНИЕ ТОЧКИ И ЛИНИИ УДАЛЕНЫ ===
-    # Средние точки пар больше не отображаются для упрощения визуализации
     
     # === НАСТРОЙКИ ГРАФИКА ===
     
-    ax.set_xlabel('θ (угол маятника, радианы)')
-    ax.set_ylabel('θ̇ (угловая скорость, рад/с)')
+    ax.set_xlabel('θ (угол, рад)')
+    ax.set_ylabel('θ̇ (скорость, рад/с)')
     ax.set_title(title)
     ax.grid(True, alpha=0.3)
     
-    # Настройка легенды
-    if tree._grandchildren_created:
-        # Создаём легенду только для внуков
-        handles, labels = ax.get_legend_handles_labels()
-        # Фильтруем только внуков (начинаются с "Внук")
-        grandchild_handles = [h for h, l in zip(handles, labels) if l and l.startswith('Внук')]
-        grandchild_labels = [l for l in labels if l and l.startswith('Внук')]
+    # Легенда больше не нужна
+    # if show_legend and _grandchildren_created:
+    #     handles, labels = ax.get_legend_handles_labels()
+    #     grandchild_handles = [h for h, l in zip(handles, labels) if l and l.startswith('Внук')]
+    #     grandchild_labels = [l for l in labels if l and l.startswith('Внук')]
         
-        if grandchild_handles:
-            legend = ax.legend(grandchild_handles, grandchild_labels, 
-                             bbox_to_anchor=(1.05, 1), loc='upper left',
-                             title='Внуки (индексы)', title_fontsize=10,
-                             fontsize=9, framealpha=0.9)
-            legend.get_title().set_fontweight('bold')
+    #     if grandchild_handles:
+    #         legend = ax.legend(grandchild_handles, grandchild_labels, 
+    #                          bbox_to_anchor=(1.05, 1), loc='upper left',
+    #                          title='Внуки (индексы)', title_fontsize=20,
+    #                          fontsize=16)
+    #         legend.get_title().set_fontweight('bold')
     
-    # Ручная настройка границ: плотно по X, отступы по Y
-    all_x_coords = []
-    all_y_coords = []
-    
-    # Собираем ВСЕ координаты
-    all_x_coords.append(tree.root['position'][0])
-    all_y_coords.append(tree.root['position'][1])
-    
-    if tree._children_created:
-        for child in tree.children:
-            all_x_coords.append(child['position'][0])
-            all_y_coords.append(child['position'][1])
-    
-    if tree._grandchildren_created:
-        grandchildren_to_show = tree.sorted_grandchildren if tree._grandchildren_sorted else tree.grandchildren
+    all_x = [root['position'][0]]
+    all_y = [root['position'][1]]
+    if _children_created:
+        for child in children:
+            all_x.append(child['position'][0])
+            all_y.append(child['position'][1])
+    if _grandchildren_created:
         for gc in grandchildren_to_show:
-            all_x_coords.append(gc['position'][0])
-            all_y_coords.append(gc['position'][1])
-    
-    # Убираем сбор координат средних точек, так как они больше не отображаются
-    
-    # Границы: плотно по X, отступы по Y
-    x_min, x_max = min(all_x_coords), max(all_x_coords)
-    y_min, y_max = min(all_y_coords), max(all_y_coords)
-    
+            all_x.append(gc['position'][0])
+            all_y.append(gc['position'][1])
+            
+    x_min, x_max = min(all_x), max(all_x)
+    y_min, y_max = min(all_y), max(all_y)
     x_range = x_max - x_min
     y_range = y_max - y_min
     
-    # По X: очень малый отступ (только чтобы точки не касались краев)
-    x_margin = max(x_range * 0.02, 1e-6)  # 2% или минимум
+    x_margin = max(x_range * 0.05, 1e-6)
+    y_margin = max(y_range * 0.1, 0.001)
     ax.set_xlim(x_min - x_margin, x_max + x_margin)
-    
-    # По Y: нормальные отступы
-    y_margin = max(y_range * 0.1, 0.001)  # 10% отступ
     ax.set_ylim(y_min - y_margin, y_max + y_margin)
     
-    plt.show()
+    if ax is None:
+        plt.tight_layout(rect=[0, 0, 0.85, 1])
+        plt.show()

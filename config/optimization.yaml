@@ -1,0 +1,34 @@
+optimizer:
+  method: "SLSQP"     # или "L-BFGS-B"
+  max_iters: 300
+  tol: 1e-6
+
+sinkhorn:
+  eps_init: 0.05  # Начальное значение снизим
+  n_iter: 120
+  annea_schedule: [0.05, 0.02, 0.01, 0.005, 0.001] # Уменьшаем значения
+
+loss:
+  margin: 0.02
+  lam_push: 1.0 # Увеличиваем силу отталкивания
+  forbid_self: true
+
+integration:
+  steps: 2
+  step_size: 0.1
+  damping: 0.0
+  normalize_state: true  # масштабирование θ, θ̇ в [-1,1]
+
+logging:
+  out_dir: "runs"
+  save_every: 25
+  save_png: true
+
+loss_weights:
+  w_distance: 1.0     # Основной вес на сближение
+  w_velocity: 0.1     # Небольшой вес на скорость
+  w_repulsion: 0.05   # Небольшой вес на отталкивание
+  w_parent_repulsion: 0.0
+  w_time: 0.0
+  p_norm: 1.0
+  alpha: 20.0       # Параметр "уверенности" для softmin
