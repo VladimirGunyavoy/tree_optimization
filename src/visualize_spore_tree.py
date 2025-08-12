@@ -23,7 +23,7 @@ def visualize_spore_tree(tree, title="Дерево спор"):
         child_colors = ['#5DADE2', '#A569BD', '#58D68D', '#F4D03F']
         for i, child in enumerate(tree.children):
             ax.scatter(child['position'][0], child['position'][1],
-                      c=child_colors[i], s=60, alpha=0.8, zorder=4)
+                      c=child_colors[i], s=60, alpha=1, zorder=4)
             
             # НАПРАВЛЕНИЕ стрелки зависит от знака dt
             if child['dt'] > 0:  # forward: от корня к ребенку
@@ -58,7 +58,7 @@ def visualize_spore_tree(tree, title="Дерево спор"):
         for gc in grandchildren_to_show:
             gc_color = grandchild_colors[gc['parent_idx']]
             ax.scatter(gc['position'][0], gc['position'][1],
-                      c=gc_color, s=40, alpha=0.9, zorder=3)
+                      c=gc_color, s=40, alpha=1, zorder=3)
             
             # Стрелка от/к родителю
             parent = tree.children[gc['parent_idx']]
@@ -83,7 +83,7 @@ def visualize_spore_tree(tree, title="Дерево спор"):
                 arrowstyle='->', 
                 mutation_scale=15,
                 color=arrow_color,
-                alpha=0.6,
+                alpha=0.5,
                 linewidth=2
             )
             ax.add_patch(arrow)
