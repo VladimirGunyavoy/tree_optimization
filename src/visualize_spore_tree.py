@@ -48,7 +48,7 @@ def visualize_spore_tree(tree_data, title="Дерево спор", ax=None, figs
         child_colors = ['#5DADE2', '#A569BD', '#58D68D', '#F4D03F']
         for i, child in enumerate(children):
             ax.scatter(child['position'][0], child['position'][1],
-                      c=child_colors[i], s=300, alpha=1, zorder=4) # Увеличен размер
+                      c=child_colors[i], s=300, alpha=1, zorder=4, label=f'{i}') # Увеличен размер
             
             # НАПРАВЛЕНИЕ стрелки зависит от знака dt
             if child['dt'] > 0:  # forward: от корня к ребенку
