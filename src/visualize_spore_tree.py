@@ -142,6 +142,6 @@ def visualize_spore_tree(tree_data, title="Дерево спор", ax=None, figs
     # ax.set_xlim(x_min - x_margin, x_max + x_margin)
     # ax.set_ylim(y_min - y_margin, y_max + y_margin)
     
-    if ax is None:
-        plt.tight_layout(rect=[0, 0, 0.85, 1])
-        plt.show()
+    # if ax is None:
+    #     plt.tight_layout(rect=[0, 0, 0.85, 1])
+    #     plt.show()
