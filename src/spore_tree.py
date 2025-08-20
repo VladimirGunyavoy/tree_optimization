@@ -9,14 +9,26 @@ class SporeTree:
     Класс для работы с деревом спор маятника.
     """
     
-    def __init__(self, pendulum, config: SporeTreeConfig):
+    
+    def __init__(self, pendulum, config: SporeTreeConfig, 
+                 dt_children: Optional[np.ndarray] = None, 
+                 dt_grandchildren: Optional[np.ndarray] = None,
+                 auto_create: bool = False,
+                 show: bool = None):
         """
         Инициализация дерева спор.
         
         Args:
             pendulum: объект маятника (PendulumSystem)
             config: конфигурация SporeTreeConfig
+            dt_children: np.array из 4 элементов - dt для детей (опционально)
+            dt_grandchildren: np.array из 8 элементов - dt для внуков (опционально)
+            auto_create: bool - создать дерево автоматически по config.dt_base и config.dt_grandchildren_factor
+            show: включать ли отладочную информацию. Если None, использует config.show_debug
         """
+        if show is None:
+            show = config.show_debug
+            
         self.pendulum = pendulum
         self.config = config
         
@@ -30,8 +42,6 @@ class SporeTree:
             'color': 'red',
             'size': self.config.root_size
         }
-
-    
         
         # Контейнеры для потомков
         self.children = []
@@ -44,9 +54,68 @@ class SporeTree:
         self._grandchildren_created = False
         self._grandchildren_sorted = False
         
-        if self.config.show_debug:
+        # Кэш для средних точек
+        self.mean_points = None
+        
+        if show:
             print(f"🌱 SporeTree создан с позицией {self.config.initial_position}")
+        
+        # АВТОМАТИЧЕСКОЕ СОЗДАНИЕ ДЕРЕВА
+        if dt_children is not None and dt_grandchildren is not None:
+            # Сценарий 1: Заданы конкретные dt массивы
+            if show:
+                print(f"📊 Создаем дерево с заданными dt:")
+                print(f"   dt_children: {dt_children}")
+                print(f"   dt_grandchildren: {dt_grandchildren}")
+            
+            self._create_tree_from_dt_arrays(dt_children, dt_grandchildren, show)
+            
+        elif auto_create:
+            # Сценарий 2: Автоматическое создание по базовым параметрам config
+            if show:
+                print(f"🤖 Создаем дерево автоматически:")
+                print(f"   dt_base: {self.config.dt_base}")
+                print(f"   dt_grandchildren_factor: {self.config.dt_grandchildren_factor}")
+            
+            self._create_tree_auto(show)
+            
+        elif show:
+            print("⚠️ Дерево создано пустым. Используйте create_children() и create_grandchildren()")
     
+    def _create_tree_from_dt_arrays(self, dt_children: np.ndarray, dt_grandchildren: np.ndarray, show: bool):
+        """Создает дерево из заданных dt массивов."""
+        # Проверяем размеры
+        assert len(dt_children) == 4, f"dt_children должен содержать 4 элемента, получено {len(dt_children)}"
+        assert len(dt_grandchildren) == 8, f"dt_grandchildren должен содержать 8 элементов, получено {len(dt_grandchildren)}"
+        
+        # Создаем детей
+        self.create_children(dt_children=dt_children, show=show)
+        
+        # Создаем внуков
+        self.create_grandchildren(dt_grandchildren=dt_grandchildren, show=show)
+        
+        if show:
+            print(f"✅ Дерево создано: {len(self.children)} детей + {len(self.grandchildren)} внуков")
+    
+    def _create_tree_auto(self, show: bool):
+        """Создает дерево автоматически по базовым параметрам config."""
+        # Все дети с базовым dt
+        dt_children = np.ones(4) * self.config.dt_base
+        
+        # Все внуки с уменьшенным dt
+        dt_grandchildren = np.ones(8) * self.config.dt_base * self.config.dt_grandchildren_factor
+        
+        # Создаем детей
+        self.create_children(dt_children=dt_children, show=show)
+        
+        # Создаем внуков  
+        self.create_grandchildren(dt_grandchildren=dt_grandchildren, show=show)
+        
+        if show:
+            print(f"✅ Автоматическое дерево создано: {len(self.children)} детей + {len(self.grandchildren)} внуков")
+
+
+
     def create_children(self, dt_children: Optional[np.ndarray] = None, show: bool = None) -> List[Dict[str, Any]]:
         """
         Создает 4 детей с разными управлениями.

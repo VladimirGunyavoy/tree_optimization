@@ -1,7 +1,12 @@
 def extract_pairs_from_chronology(chronology, show=False):
     """
-    Извлекает пары внуков по правилу "первый в хронологии".
-    Каждый внук спаривается с первым внуком из своей хронологии встреч.
+    Извлекает пары внуков по умной логике на основе расстояний.
+    
+    Логика:
+    1. Идем по хронологии встреч для каждого внука
+    2. Если встречаем внука с расстоянием < 1e-6, берем его в пару и останавливаемся
+    3. Если встречаем родителя с расстоянием < 1e-6, останавливаемся и берем лучшего внука из тех, что видели ДО родителя
+    4. Если дошли до конца - берем лучшего доступного внука
     
     Args:
         chronology: результат от create_chronological_meetings()
@@ -11,8 +16,8 @@ def extract_pairs_from_chronology(chronology, show=False):
         list: список пар вида [(gc_i, gc_j, meeting_info), ...]
     """
     if show:
-        print("ФОРМИРОВАНИЕ ПАР ПО ПРАВИЛУ 'ПЕРВЫЙ В ХРОНОЛОГИИ'")
-        print("=" * 60)
+        print("ФОРМИРОВАНИЕ ПАР ПО УМНОЙ ЛОГИКЕ (РАССТОЯНИЯ < 1e-6 + ЛУЧШИЙ ВНУК)")
+        print("=" * 70)
     
     pairs = []
     used_grandchildren = set()  # Чтобы избежать дублирования
@@ -29,21 +34,75 @@ def extract_pairs_from_chronology(chronology, show=False):
         
         meetings = chronology[gc_idx]
         
-        # Ищем первую встречу с другим внуком
-        first_grandchild_meeting = None
-        for meeting in meetings:
+        if show:
+            print(f"\nАнализируем gc_{gc_idx}:")
+            print(f"  Всего встреч в хронологии: {len(meetings)}")
+            print(f"  (встречи только с ЧУЖИМИ родителями - свои исключены в таблицах)")
+        
+        # Идем по хронологии и применяем умную логику
+        selected_meeting = None
+        best_grandchild_meeting = None  # Лучший внук, встреченный до сих пор
+        stop_reason = None
+        
+        for i, meeting in enumerate(meetings):
+            distance = meeting['distance']
+            
+            if show:
+                print(f"    {i+1}. {meeting['partner']}: расст={distance}, тип={meeting['type']}")
+            
             if meeting['type'] == 'grandchild':
                 partner_idx = meeting['partner_idx']
+                
                 # Проверяем что партнер еще не использован
                 if partner_idx not in used_grandchildren:
-                    first_grandchild_meeting = meeting
+                    # Обновляем лучшего внука
+                    if best_grandchild_meeting is None or distance < best_grandchild_meeting['distance']:
+                        best_grandchild_meeting = meeting
+                        if show:
+                            print(f"      📝 Обновили лучшего внука: {meeting['partner']} (расст={distance})")
+                    
+                    # Если расстояние < 1e-6, сразу берем
+                    if distance < 1e-6:
+                        selected_meeting = meeting
+                        stop_reason = f"нашли внука {meeting['partner']} с расстоянием {distance} < 1e-6"
+                        if show:
+                            print(f"      ✅ ВЫБРАН СРАЗУ: {stop_reason}")
+                        break
+                    else:
+                        if show:
+                            print(f"      ⏩ Внук доступен, но расстояние {distance} >= 1e-6, продолжаем поиск")
+                else:
+                    if show:
+                        print(f"      ❌ Внук недоступен (уже использован)")
+                        
+            elif meeting['type'] == 'parent':
+                # Все родители в хронологии уже ЧУЖИЕ (свои исключены в таблицах)
+                if distance < 1e-6:
+                    # Останавливаемся и берем лучшего внука из тех, что видели
+                    stop_reason = f"встретили чужого родителя {meeting['partner']} с расстоянием {distance} < 1e-6"
+                    if best_grandchild_meeting is not None:
+                        selected_meeting = best_grandchild_meeting
+                        stop_reason += f", берем лучшего внука {best_grandchild_meeting['partner']}"
+                    if show:
+                        print(f"      🛑 СТОП: {stop_reason}")
                     break
+                else:
+                    if show:
+                        print(f"      ⏩ Чужой родитель {meeting['partner']}, но расстояние {distance} >= 1e-6, продолжаем поиск")
         
-        if first_grandchild_meeting:
-            partner_idx = first_grandchild_meeting['partner_idx']
+        # Если дошли до конца и ничего не выбрали, берем лучшего внука
+        if selected_meeting is None and best_grandchild_meeting is not None:
+            selected_meeting = best_grandchild_meeting
+            stop_reason = f"дошли до конца хронологии, берем лучшего внука {best_grandchild_meeting['partner']}"
+            if show:
+                print(f"      🏁 КОНЕЦ ХРОНОЛОГИИ: {stop_reason}")
+        
+        # Обрабатываем результат
+        if selected_meeting:
+            partner_idx = selected_meeting['partner_idx']
             
             # Создаем пару
-            pair = (gc_idx, partner_idx, first_grandchild_meeting)
+            pair = (gc_idx, partner_idx, selected_meeting)
             pairs.append(pair)
             
             # Помечаем обоих как использованных
@@ -51,65 +110,84 @@ def extract_pairs_from_chronology(chronology, show=False):
             used_grandchildren.add(partner_idx)
             
             if show:
-                meeting_time = first_grandchild_meeting['meeting_time']
-                distance = first_grandchild_meeting['distance']
-                print(f"gc_{gc_idx} + gc_{partner_idx}: t={meeting_time:.4f}с, расст={distance:.5f}")
+                meeting_time = selected_meeting['meeting_time']
+                distance = selected_meeting['distance']
+                print(f"  🎯 РЕЗУЛЬТАТ: gc_{gc_idx} + gc_{partner_idx}, t={meeting_time}с, расст={distance}")
         else:
             if show:
                 if meetings:
-                    # Есть встречи, но только с родителями
-                    print(f"gc_{gc_idx}: нет встреч с доступными внуками (только родители)")
+                    print(f"  ❌ РЕЗУЛЬТАТ: gc_{gc_idx} не нашел подходящих внуков")
                 else:
-                    # Вообще нет встреч
-                    print(f"gc_{gc_idx}: нет встреч вообще")
+                    print(f"  ❌ РЕЗУЛЬТАТ: gc_{gc_idx} вообще нет встреч")
     
     if show:
         unpaired_count = len(chronology) - len(used_grandchildren)
-        print(f"\nРЕЗУЛЬТАТ:")
+        print(f"\nИТОГОВАЯ СТАТИСТИКА:")
+        print("=" * 30)
         print(f"  Сформировано пар: {len(pairs)}")
         print(f"  Внуков в парах: {len(used_grandchildren)}")
         print(f"  Внуков без пар: {unpaired_count}")
+        
+        print(f"\nСПИСОК ПАР:")
+        for i, (gc_i, gc_j, meeting) in enumerate(pairs, 1):
+            print(f"  {i}. gc_{gc_i} ↔ gc_{gc_j}: t={meeting['meeting_time']}с, расст={meeting['distance']}")
     
     return pairs
 
 
-def _calculate_min_parent_distance(tree, show=False):
+def analyze_pairing_quality(pairs, chronology, show=False):
     """
-    Вычисляет минимальное расстояние между родителями.
+    Анализирует качество сформированных пар.
     
     Args:
-        tree: SporeTree объект
-        show: bool - показать вычисления
+        pairs: результат от extract_pairs_from_chronology()
+        chronology: исходная хронология
+        show: bool - показать анализ
         
     Returns:
-        float: минимальное расстояние между родителями
+        dict: статистика качества пар
     """
-    import numpy as np
+    if not pairs:
+        return {'total_pairs': 0, 'avg_distance': 0, 'avg_time': 0}
     
-    if len(tree.children) < 2:
-        if show:
-            print("Недостаточно родителей для вычисления расстояния")
-        return float('inf')
+    distances = []
+    times = []
     
-    min_distance = float('inf')
-    min_pair = None
+    for gc_i, gc_j, meeting in pairs:
+        distances.append(meeting['distance'])
+        times.append(meeting['meeting_time'])
     
-    # Проверяем все пары родителей
-    for i in range(len(tree.children)):
-        for j in range(i + 1, len(tree.children)):
-            pos_i = tree.children[i]['position']
-            pos_j = tree.children[j]['position']
-            distance = np.linalg.norm(pos_i - pos_j)
-            
-            if distance < min_distance:
-                min_distance = distance
-                min_pair = (i, j)
+    stats = {
+        'total_pairs': len(pairs),
+        'avg_distance': sum(distances) / len(distances),
+        'min_distance': min(distances),
+        'max_distance': max(distances),
+        'avg_time': sum(times) / len(times),
+        'min_time': min(times),
+        'max_time': max(times),
+        'ultra_close_pairs': sum(1 for d in distances if d < 1e-6),  # Расстояние < 1e-6
+        'very_close_pairs': sum(1 for d in distances if d < 1e-5),   # Расстояние < 1e-5
+        'close_pairs': sum(1 for d in distances if d < 1e-4)         # Расстояние < 1e-4
+    }
     
-    if show and min_pair:
-        print(f"Минимальное расстояние между parent_{min_pair[0]} и parent_{min_pair[1]}: {min_distance:.5f}")
+    if show:
+        print("АНАЛИЗ КАЧЕСТВА ПАР:")
+        print("=" * 30)
+        print(f"Всего пар: {stats['total_pairs']}")
+        print(f"\nРасстояния:")
+        print(f"  Среднее: {stats['avg_distance']}")
+        print(f"  Минимальное: {stats['min_distance']}")
+        print(f"  Максимальное: {stats['max_distance']}")
+        print(f"\nВремена встреч:")
+        print(f"  Среднее: {stats['avg_time']}с")
+        print(f"  Минимальное: {stats['min_time']}с")
+        print(f"  Максимальное: {stats['max_time']}с")
+        print(f"\nКачество сближения:")
+        print(f"  Ультра-близкие (< 1e-6): {stats['ultra_close_pairs']}/{stats['total_pairs']}")
+        print(f"  Очень близкие (< 1e-5): {stats['very_close_pairs']}/{stats['total_pairs']}")
+        print(f"  Близкие (< 1e-4): {stats['close_pairs']}/{stats['total_pairs']}")
     
-    return min_distance
-
+    return stats
 
 def get_pair_details(pairs, tree, show=False):
     """

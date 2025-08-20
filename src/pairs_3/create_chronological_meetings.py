@@ -98,13 +98,13 @@ def create_chronological_meetings(tree, pendulum, dt_bounds=(0.001, 0.1), show=F
                 for i, meeting in enumerate(meetings):
                     if meeting['type'] == 'grandchild':
                         wait_info = f"(ждет {meeting['who_waits']})" if meeting['who_waits'] else ""
-                        print(f"    {i+1}. t={meeting['meeting_time']:.4f}с: {meeting['partner']} "
-                              f"[gc: {meeting['time_gc']:+.4f}с, партнер: {meeting['time_partner']:+.4f}с] "
-                              f"расст={meeting['distance']:.5f} {wait_info}")
+                        print(f"    {i+1}. t={meeting['meeting_time']:.6f}с: {meeting['partner']} "
+                              f"[gc: {meeting['time_gc']:+.6f}с, партнер: {meeting['time_partner']:+.6f}с] "
+                              f"расст={meeting['distance']} {wait_info}")
                     else:
-                        print(f"    {i+1}. t={meeting['meeting_time']:.4f}с: {meeting['partner']} "
-                              f"[gc: {meeting['time_gc']:+.4f}с] "
-                              f"расст={meeting['distance']:.5f}")
+                        print(f"    {i+1}. t={meeting['meeting_time']:.6f}с: {meeting['partner']} "
+                              f"[gc: {meeting['time_gc']:+.6f}с] "
+                              f"расст={meeting['distance']}")
             else:
                 print(f"  Встреч не найдено")
     

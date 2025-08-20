@@ -1,6 +1,7 @@
 def build_grandchild_distance_tables(tree, pendulum, dt_bounds=(0.001, 0.1), show=False):
     """
     Строит таблицы минимальных расстояний и оптимальных времен для пар внуков.
+    Отсекает пары с расстоянием больше 1/10 от минимального расстояния между родителями.
     
     Args:
         tree: SporeTree - объект дерева с созданными внуками
@@ -27,7 +28,7 @@ def build_grandchild_distance_tables(tree, pendulum, dt_bounds=(0.001, 0.1), sho
         print("Построение таблиц расстояний и времен для пар внуков")
         print("=" * 60)
     
-    # Импортируем функции (предполагаем что они в том же модуле или импортированы)
+    # Импортируем функции
     from .compute_convergence_tables import compute_distance_derivative_table
     from .find_converging_pairs import find_converging_grandchild_pairs
     from .optimize_grandchild_pairs import optimize_grandchild_pair_distance
@@ -60,10 +61,13 @@ def build_grandchild_distance_tables(tree, pendulum, dt_bounds=(0.001, 0.1), sho
         if show:
             print(f"\n  Пара {pair_name} (скорость: {pair['velocity']:.5f}):")
         
+        # ИСПРАВЛЕНО: distance_constraint теперь рассчитывается как 1/10 от мин. расст. между родителями
         result = optimize_grandchild_pair_distance(
             gc_i_idx, gc_j_idx, 
             tree.grandchildren, tree.children, pendulum,
-            dt_bounds=dt_bounds, show=show
+            dt_bounds=dt_bounds,
+            root_position=tree.root['position'],
+            show=show
         )
         
         optimization_results[pair_name] = result
@@ -88,6 +92,8 @@ def build_grandchild_distance_tables(tree, pendulum, dt_bounds=(0.001, 0.1), sho
             if show:
                 print(f"    Успех: расстояние={result['min_distance']:.5f}")
                 print(f"    dt_i={result['optimal_dt_i']:+.5f}, dt_j={result['optimal_dt_j']:+.5f}")
+                if 'passes_constraint' in result:
+                    print(f"    Проходит constraint: {'ДА' if result['passes_constraint'] else 'НЕТ'}")
         else:
             if show:
                 print(f"    Неудача: оптимизация не сошлась")
@@ -123,6 +129,20 @@ def build_grandchild_distance_tables(tree, pendulum, dt_bounds=(0.001, 0.1), sho
             print(f"  Успешных оптимизаций: {len(valid_distances)}")
             print(f"  Минимальное расстояние: {np.min(valid_distances):.6f}")
             print(f"  Среднее расстояние: {np.mean(valid_distances):.6f}")
+            
+            # Статистика по constraint
+            passed_constraint = sum(1 for result in optimization_results.values() 
+                                  if result.get('passes_constraint', False))
+            failed_constraint = sum(1 for result in optimization_results.values() 
+                                  if result.get('success', False) and not result.get('passes_constraint', True))
+            print(f"  Прошли distance constraint: {passed_constraint}/{len(optimization_results)}")
+            print(f"  Отсечены по constraint: {failed_constraint}/{len(optimization_results)}")
+            
+            # Показываем distance constraint
+            first_result = next(iter(optimization_results.values()), {})
+            constraint_value = first_result.get('distance_constraint')
+            if constraint_value is not None:
+                print(f"  Distance constraint: {constraint_value:.5f}")
     
     return {
         'distance_table': distance_df,
@@ -132,7 +152,6 @@ def build_grandchild_distance_tables(tree, pendulum, dt_bounds=(0.001, 0.1), sho
         'optimization_results': optimization_results,
         'converging_pairs': converging_pairs
     }
-
 
 def build_grandchild_parent_distance_tables(tree, pendulum, dt_bounds=(0.001, 0.1), show=False):
     """

@@ -1,5 +1,5 @@
 def optimize_grandchild_pair_distance(gc_i_idx, gc_j_idx, grandchildren, children, pendulum, 
-                                     dt_bounds=(0.001, 0.1), show=False):
+                                     dt_bounds=(0.001, 0.1), root_position=None, show=False):
     """
     Оптимизирует dt для пары внуков с учетом их направлений времени.
     
@@ -9,6 +9,7 @@ def optimize_grandchild_pair_distance(gc_i_idx, gc_j_idx, grandchildren, childre
         children: list - список всех родителей
         pendulum: PendulumSystem - объект маятника
         dt_bounds: tuple - границы поиска |dt| (всегда положительные)
+        root_position: np.array - позиция корня для расчета distance_constraint
         show: bool - показать детали оптимизации
         
     Returns:
@@ -19,6 +20,19 @@ def optimize_grandchild_pair_distance(gc_i_idx, gc_j_idx, grandchildren, childre
     
     gc_i = grandchildren[gc_i_idx]
     gc_j = grandchildren[gc_j_idx]
+    
+    # ВЫЧИСЛЯЕМ DISTANCE_CONSTRAINT: 1/10 от минимального расстояния корень-родители
+    if root_position is not None:
+        parent_distances = []
+        for parent in children:
+            distance = np.linalg.norm(parent['position'] - root_position)
+            parent_distances.append(distance)
+        min_parent_distance = min(parent_distances)
+        distance_constraint = min_parent_distance / 10.0
+        if show:
+            print(f"    Distance constraint: {distance_constraint:.5f} (1/10 от мин. расст. корень-родители: {min_parent_distance:.5f})")
+    else:
+        distance_constraint = None  # Без ограничений если корень не передан
     
     # Позиции родителей (стартовые точки)
     parent_i_pos = children[gc_i['parent_idx']]['position']
@@ -87,16 +101,7 @@ def optimize_grandchild_pair_distance(gc_i_idx, gc_j_idx, grandchildren, childre
     
     for method in methods:
         try:
-            if method == 'SLSQP':
-                result = minimize(
-                    distance_function,
-                    x0=x0,
-                    bounds=bounds,
-                    constraints=constraints,
-                    method=method,
-                    options={'ftol': 1e-9}
-                )
-            elif method == 'L-BFGS-B':
+            if method == 'L-BFGS-B':
                 result = minimize(
                     distance_function,
                     x0=x0,
@@ -116,7 +121,7 @@ def optimize_grandchild_pair_distance(gc_i_idx, gc_j_idx, grandchildren, childre
                 print(f"    Метод {method}: success={result.success}, fun={result.fun:.5f}")
                 print(f"    Метод {method}: result.x={result.x}")
             
-            # ДОПОЛНИТЕЛЬНАЯ ПРОВЕРКА: убеждаемся что результат в границах и соблюдает constraint
+            # ДОПОЛНИТЕЛЬНАЯ ПРОВЕРКА: убеждаемся что результат в границах
             if result.success:
                 dt_i_test, dt_j_test = result.x
                 dt_i_in_bounds = dt_i_bounds[0] <= dt_i_test <= dt_i_bounds[1]
@@ -124,7 +129,7 @@ def optimize_grandchild_pair_distance(gc_i_idx, gc_j_idx, grandchildren, childre
                 
                 # Проверяем constraint на расстояние если есть
                 distance_ok = True
-                if distance_constraint:
+                if distance_constraint is not None:
                     test_distance = distance_function(result.x)
                     distance_ok = test_distance <= distance_constraint
                     if show and not distance_ok:
@@ -194,6 +199,8 @@ def optimize_grandchild_pair_distance(gc_i_idx, gc_j_idx, grandchildren, childre
             'final_position_i': final_pos_i,
             'final_position_j': final_pos_j,
             'method_used': 'scipy_optimize',
+            'distance_constraint': distance_constraint,
+            'passes_constraint': distance_constraint is None or best_distance <= distance_constraint,
             'constraints': {
                 'direction_i': direction_i,
                 'direction_j': direction_j,
@@ -207,6 +214,8 @@ def optimize_grandchild_pair_distance(gc_i_idx, gc_j_idx, grandchildren, childre
             'success': False,
             'min_distance': float('inf'),
             'method_used': 'failed',
+            'distance_constraint': distance_constraint,
+            'passes_constraint': False,
             'constraints': {
                 'direction_i': direction_i,
                 'direction_j': direction_j,
@@ -299,12 +308,12 @@ def optimize_grandchild_parent_distance(gc_idx, parent_idx, grandchildren, child
                 'min_distance': result.fun,
                 'optimal_dt': optimal_dt,
                 'final_position': final_pos,
-                'target_position': target_parent_pos,
-                'method_used': 'scipy_minimize_scalar',
+                'method_used': 'minimize_scalar',
                 'constraints': {
                     'direction': direction,
                     'bounds': dt_bounds_signed
-                }
+                },
+                'iterations': getattr(result, 'nit', 0)
             }
         else:
             return {
@@ -319,12 +328,12 @@ def optimize_grandchild_parent_distance(gc_idx, parent_idx, grandchildren, child
             
     except Exception as e:
         if show:
-            print(f"    Ошибка оптимизации: {e}")
+            print(f"    Ошибка в оптимизации: {e}")
         return {
             'success': False,
             'min_distance': float('inf'),
-            'error': str(e),
             'method_used': 'failed',
+            'error': str(e),
             'constraints': {
                 'direction': direction,
                 'bounds': dt_bounds_signed
