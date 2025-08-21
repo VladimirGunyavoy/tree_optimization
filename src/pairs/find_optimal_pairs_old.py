@@ -1,178 +1,17 @@
 import numpy as np
 import pandas as pd
-from scipy.optimize import minimize, minimize_scalar
 
 # Импорты всех необходимых функций из пайплайна
 from .compute_convergence_tables import compute_distance_derivative_table, compute_grandchild_parent_convergence_table
 from .find_converging_pairs import find_converging_grandchild_pairs, find_converging_grandchild_parent_pairs
+from .optimize_grandchild_pair_distance import optimize_grandchild_pair_distance
+from .optimize_grandchild_parent_distance import optimize_grandchild_parent_distance
 from .extract_pairs_from_chronology import extract_pairs_from_chronology
-
-
-def optimize_grandchild_pair_distance(gc_i_idx, gc_j_idx, grandchildren, children, pendulum, 
-                                     dt_bounds=None, root_position=None, show=False):
-    """Оптимизирует dt для пары внуков с учетом их направлений времени"""
-    
-    gc_i = grandchildren[gc_i_idx]
-    gc_j = grandchildren[gc_j_idx]
-    
-    # Distance constraint
-    if root_position is not None:
-        parent_distances = [np.linalg.norm(parent['position'] - root_position) for parent in children]
-        distance_constraint = min(parent_distances) / 10.0
-    else:
-        distance_constraint = None
-    
-    # Позиции родителей
-    parent_i_pos = children[gc_i['parent_idx']]['position']
-    parent_j_pos = children[gc_j['parent_idx']]['position']
-    
-    # Адаптивные границы
-    if dt_bounds is None:
-        parent_times = [abs(child['dt']) for child in children]
-        dt_max = 2 * max(parent_times)
-        dt_bounds = (0.001, dt_max)
-    
-    # Определяем границы для каждого внука
-    original_dt_i, original_dt_j = gc_i['dt'], gc_j['dt']
-    
-    dt_i_bounds = dt_bounds if original_dt_i > 0 else (-dt_bounds[1], -dt_bounds[0])
-    dt_j_bounds = dt_bounds if original_dt_j > 0 else (-dt_bounds[1], -dt_bounds[0])
-    
-    def distance_function(dt_params):
-        """Быстрая функция расстояния с явным JIT"""
-        dt_i, dt_j = dt_params
-        try:
-            pos_i = pendulum.step(parent_i_pos, gc_i['control'], dt_i, method="jit")
-            pos_j = pendulum.step(parent_j_pos, gc_j['control'], dt_j, method="jit")
-            return np.linalg.norm(pos_i - pos_j)
-        except:
-            return 1e6
-    
-    # Начальное приближение
-    x0 = [(dt_i_bounds[0] + dt_i_bounds[1]) / 2, 
-          (dt_j_bounds[0] + dt_j_bounds[1]) / 2]
-    bounds = [dt_i_bounds, dt_j_bounds]
-    
-    # БЫСТРАЯ оптимизация
-    try:
-        result = minimize(
-            distance_function,
-            x0=x0,
-            bounds=bounds,
-            method='L-BFGS-B',
-            options={
-                'ftol': 1e-6,    # Менее строго для скорости
-                'gtol': 1e-5,    
-                'maxiter': 200   # Меньше итераций
-            }
-        )
-        
-        if result.success and len(result.x) >= 2:
-            optimal_dt_i, optimal_dt_j = result.x
-            
-            # Проверка границ
-            dt_i_valid = dt_i_bounds[0] <= optimal_dt_i <= dt_i_bounds[1]
-            dt_j_valid = dt_j_bounds[0] <= optimal_dt_j <= dt_j_bounds[1]
-            
-            if dt_i_valid and dt_j_valid:
-                passes_constraint = distance_constraint is None or result.fun <= distance_constraint
-                
-                # Финальные позиции
-                final_pos_i = pendulum.step(parent_i_pos, gc_i['control'], optimal_dt_i, method="jit")
-                final_pos_j = pendulum.step(parent_j_pos, gc_j['control'], optimal_dt_j, method="jit")
-                
-                return {
-                    'success': True,
-                    'min_distance': result.fun,
-                    'optimal_dt_i': optimal_dt_i,
-                    'optimal_dt_j': optimal_dt_j,
-                    'final_position_i': final_pos_i,
-                    'final_position_j': final_pos_j,
-                    'passes_constraint': passes_constraint,
-                    'distance_constraint': distance_constraint,
-                    'method_used': 'enhanced_L-BFGS-B',
-                    'iterations': getattr(result, 'nit', 0),
-                    'function_evaluations': getattr(result, 'nfev', 0)
-                }
-    except:
-        pass
-    
-    return {
-        'success': False,
-        'min_distance': float('inf'),
-        'method_used': 'fast_failed',
-        'passes_constraint': False,
-        'distance_constraint': distance_constraint
-    }
-
-
-def optimize_grandchild_parent_distance(gc_idx, parent_idx, grandchildren, children, pendulum, 
-                                       dt_bounds=None, show=False):
-    """Оптимизирует расстояние между внуком и целевым родителем"""
-    
-    gc = grandchildren[gc_idx]
-    gc_parent_pos = children[gc['parent_idx']]['position']
-    target_parent_pos = children[parent_idx]['position']
-    
-    # Адаптивные границы
-    if dt_bounds is None:
-        parent_times = [abs(child['dt']) for child in children]
-        dt_max = 2 * max(parent_times)
-        dt_bounds = (0.001, dt_max)
-    
-    # Направление времени
-    dt_bounds_signed = dt_bounds if gc['dt'] > 0 else (-dt_bounds[1], -dt_bounds[0])
-    
-    def distance_function(dt):
-        try:
-            gc_final_pos = pendulum.step(gc_parent_pos, gc['control'], dt, method="jit")
-            return np.linalg.norm(gc_final_pos - target_parent_pos)
-        except:
-            return 1e6
-    
-    # БЫСТРАЯ оптимизация
-    try:
-        result = minimize_scalar(
-            distance_function,
-            bounds=dt_bounds_signed,
-            method='bounded',
-            options={
-                'xatol': 1e-6,   # Менее строго
-                'maxiter': 200   # Меньше итераций
-            }
-        )
-        
-        if result.success:
-            optimal_dt = result.x
-            dt_valid = dt_bounds_signed[0] <= optimal_dt <= dt_bounds_signed[1]
-            
-            if dt_valid:
-                final_pos = pendulum.step(gc_parent_pos, gc['control'], optimal_dt, method="jit")
-                
-                return {
-                    'success': True,
-                    'min_distance': result.fun,
-                    'optimal_dt': optimal_dt,
-                    'final_position': final_pos,
-                    'method_used': 'enhanced_bounded',
-                    'function_evaluations': getattr(result, 'nfev', 0),
-                    'iterations': getattr(result, 'nit', 0)
-                }
-    except:
-        pass
-    
-    return {
-        'success': False,
-        'min_distance': float('inf'),
-        'method_used': 'fast_failed'
-    }
 
 
 def find_optimal_pairs(tree, show=False):
     """
     Находит оптимальные пары внуков в дереве спор через полный пайплайн оптимизации.
-    
-    УЛУЧШЕННАЯ ВЕРСИЯ с оптимизированными параметрами scipy.optimize для ускорения.
     
     Выполняет 6 этапов:
     1. Вычисление скоростей сближения внук-внук и внук-родитель
@@ -214,7 +53,7 @@ def find_optimal_pairs(tree, show=False):
         pendulum = tree.pendulum
         
         if show:
-            print("ЗАПУСК ПАЙПЛАЙНА ПОИСКА ОПТИМАЛЬНЫХ ПАР...")
+            print("ЗАПУСК ПОЛНОГО ПАЙПЛАЙНА ПОИСКА ОПТИМАЛЬНЫХ ПАР...")
             print("="*60)
             
     except Exception as e:
@@ -282,7 +121,7 @@ def find_optimal_pairs(tree, show=False):
         return None
     
     # ============================================================================
-    # ЭТАП 3: ОПТИМИЗАЦИЯ ПАР (улучшенные параметры)
+    # ЭТАП 3: ОПТИМИЗАЦИЯ ПАР (с адаптивными границами)
     # ============================================================================
     
     try:
@@ -303,7 +142,7 @@ def find_optimal_pairs(tree, show=False):
             print(f"\n    📏 Distance constraint: {distance_constraint:.5f}")
             print(f"    📊 Адаптивные границы dt: (0.001, {adaptive_dt_max:.5f})")
         
-        # БЫСТРАЯ оптимизация внук-внук
+        # Оптимизация внук-внук
         gc_gc_optimization_results = {}
         for pair in converging_gc_pairs:
             gc_i_idx = pair['gc_i']
@@ -311,7 +150,7 @@ def find_optimal_pairs(tree, show=False):
             pair_name = pair['pair_name']
             
             if show:
-                print(f"    Оптимизация {pair_name}...")
+                print(f"    🔧 Оптимизация {pair_name}...")
             
             result = optimize_grandchild_pair_distance(
                 gc_i_idx, gc_j_idx, 
@@ -323,7 +162,7 @@ def find_optimal_pairs(tree, show=False):
             
             gc_gc_optimization_results[pair_name] = result
         
-        # БЫСТРАЯ оптимизация внук-родитель
+        # Оптимизация внук-родитель
         gc_parent_optimization_results = {}
         for pair in converging_gc_parent_pairs:
             gc_idx = pair['gc_idx']
@@ -331,7 +170,7 @@ def find_optimal_pairs(tree, show=False):
             pair_name = pair['pair_name']
             
             if show:
-                print(f"    Оптимизация {pair_name}...")
+                print(f"    🔧 Оптимизация {pair_name}...")
             
             result = optimize_grandchild_parent_distance(
                 gc_idx, parent_idx,
@@ -354,14 +193,7 @@ def find_optimal_pairs(tree, show=False):
             return None
         
         if show:
-            # Подсчет вызовов функции для статистики
-            total_nfev = sum(r.get('function_evaluations', 0) for r in gc_gc_optimization_results.values())
-            total_nfev += sum(r.get('function_evaluations', 0) for r in gc_parent_optimization_results.values())
-            total_pairs = len(converging_gc_pairs) + len(converging_gc_parent_pairs)
-            avg_nfev = total_nfev / total_pairs if total_pairs > 0 else 0
-            
             print(f"    ✅ ({gc_gc_constraint_pass}/{len(converging_gc_pairs)} внук-внук успешно, {gc_parent_success}/{len(converging_gc_parent_pairs)} внук-родитель успешно)")
-            print(f"    📊 ~{avg_nfev:.0f} вызовов функции на пару")
             
     except Exception as e:
         if show:
@@ -444,14 +276,14 @@ def find_optimal_pairs(tree, show=False):
         return None
     
     # ============================================================================
-    # ЭТАП 5: СОЗДАНИЕ ХРОНОЛОГИИ (исправлено)
+    # ЭТАП 5: СОЗДАНИЕ ХРОНОЛОГИИ
     # ============================================================================
     
     try:
         if show:
             print("5️⃣ Создание хронологии встреч...", end=" ")
         
-        # Создаем хронологию из таблиц (как в оригинальном коде)
+        # Создаем хронологию из таблиц
         chronology = {}
         
         for gc_idx in range(len(tree.grandchildren)):
@@ -557,7 +389,7 @@ def find_optimal_pairs(tree, show=False):
     
     if show:
         print("\n" + "="*60)
-        print("ПАЙПЛАЙН ЗАВЕРШЕН УСПЕШНО!")
+        print("🏁 ПАЙПЛАЙН ЗАВЕРШЕН УСПЕШНО!")
         print("="*60)
         
         print(f"📊 Адаптивные границы dt: (0.001, {adaptive_dt_max:.5f})")
