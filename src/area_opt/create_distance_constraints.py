@@ -126,7 +126,7 @@ def create_distance_constraints(pairs, tree, pendulum, constraint_distance=1e-5,
                         # Возвращаем constraint_distance - distance
                         # Положительное = констрейнт выполнен (расстояние меньше порога)
                         # Отрицательное = констрейнт нарушен (расстояние больше порога)
-                        return constraint_distance - distance
+                        return (constraint_distance - distance)
                         
                     except Exception as e:
                         # При ошибке возвращаем большое отрицательное значение (нарушение)
