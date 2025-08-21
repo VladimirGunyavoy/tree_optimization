@@ -2,7 +2,7 @@ import numpy as np
 from typing import List, Dict, Any, Optional
 
 # Импорт конфигурации (должен быть в том же пакете или добавлен в путь)
-from .spore_tree_config import SporeTreeConfig
+from spore_tree_config import SporeTreeConfig
 
 class SporeTree:
     """
